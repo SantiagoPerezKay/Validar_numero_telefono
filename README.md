@@ -34,7 +34,7 @@ Ideal para:
 
 Archivo CSV simple, por ejemplo:
 
-```csv
+csv
 3462-516761
 +54 11 1234-5678
 (3462) 516761
