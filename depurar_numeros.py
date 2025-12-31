@@ -1,122 +1,109 @@
 import csv
 import re
+import os
 
-def validar_numero_completo(num_limpio):
-    """
-    Valida si un número limpio cumple con el formato estándar argentino:
-    +54(código de área)(número), con un total de 12 o 13 dígitos después del +
-    Ejemplos válidos: +543462516761, +541112345678
-    """
-    # El patrón busca:
-    # ^\+54 : Comienza con +54
-    # \d{10,11}$ : Seguido de 10 u 11 dígitos hasta el final de la cadena.
-    # El 9 inicial del código de área se elimina en la normalización, así que
-    # un número de 10 dígitos (ej. 3462 516761) se convierte a +543462516761 (12 digitos en total)
-    # y un número de 11 dígitos (ej. 11 12345678) a +541112345678 (12 digitos en total)
-    # Algunos números pueden ser más largos, como +54911... que tiene 13 dígitos.
-    # Es una validación flexible para capturar la mayoría de los casos.
-    if re.match(r'^\+54\d{10,11}$', num_limpio):
-        return True
-    return False
+CARACTERISTICA_DEFAULT = "3462"  # Venado Tuerto
+ARCHIVO_SALIDA = "Numeros_clientes_procesados.txt"
+
+def validar_numero_completo(num):
+    return re.match(r'^\+54\d{10,13}$', num) is not None
 
 def limpiar_numero(num):
-    # Quitar todo excepto dígitos
-    solo_digitos = re.sub(r'\D', '', num)
-
-    if len(solo_digitos) == 0:
+    if not num:
         return ""
 
-    # Normalización del número
-    if solo_digitos.startswith("549"):
-        # Ejemplo: 5493462516761 -> +5493462516761 (13 dígitos)
-        num_normalizado = "+" + solo_digitos
-    elif solo_digitos.startswith("54"):
-        # Ejemplo: 543462516761 -> +543462516761 (12 dígitos)
-        num_normalizado = "+" + solo_digitos
-    elif solo_digitos.startswith("9"):
-        # Ejemplo: 93462516761 -> +5493462516761 (13 dígitos)
-        num_normalizado = "+54" + solo_digitos
-    else:
-        # Si empieza con otro número, agregar +54 (sin el 9)
-        # Ejemplo: 3462516761 -> +543462516761 (12 dígitos)
-        num_normalizado = "+54" + solo_digitos
-    
-    # Validar el número normalizado
-    if validar_numero_completo(num_normalizado):
-        return num_normalizado
-    else:
-        # Si no cumple el formato, ignorarlo devolviendo una cadena vacía
+    num = num.strip().upper()
+
+    if num in ("ND", "N/D", "NO TIENE", "SIN TELEFONO"):
         return ""
 
+    solo = re.sub(r'\D', '', num)
+
+    if len(solo) < 6:
+        return ""
+
+    # Local sin característica (ej: 427357)
+    if len(solo) in (6, 7, 8):
+        solo = CARACTERISTICA_DEFAULT + solo
+
+    # Celular con 15 (ej: 346215427357)
+    if len(solo) == 12 and solo[4:6] == "15":
+        solo = solo[:4] + solo[6:]
+
+    # Sin país
+    if not solo.startswith("54"):
+        solo = "54" + solo
+
+    num_final = "+" + solo
+
+    return num_final if validar_numero_completo(num_final) else ""
 def procesar_csv(ruta):
-    numeros_limpios = []
+    numeros_limpios = []      # mantiene orden
+    vistos = set()            # evita duplicados
 
-    try:
-        with open(ruta, newline='', encoding='utf-8') as csvfile:
-            lector = csv.reader(csvfile)
-            for fila in lector:
-                if len(fila) == 0:
-                    continue
-                num_original = fila[0]
-                num_limpio = limpiar_numero(num_original)
-                # Solo agrega el número si no está vacío (es decir, si la validación fue exitosa)
-                if num_limpio:
-                    numeros_limpios.append(num_limpio)
-    except FileNotFoundError:
-        raise
-    except Exception as e:
-        print(f"Error al procesar el archivo: {e}")
-        return []
+    encodings = ["utf-8", "latin-1", "cp1252"]
+
+    for enc in encodings:
+        try:
+            with open(ruta, newline='', encoding=enc) as csvfile:
+                lector = csv.reader(csvfile)
+                for fila in lector:
+                    if not fila:
+                        continue
+
+                    num_limpio = limpiar_numero(fila[0])
+
+                    if num_limpio and num_limpio not in vistos:
+                        numeros_limpios.append(num_limpio)
+                        vistos.add(num_limpio)
+
+            print(f"Archivo leído correctamente con encoding: {enc}")
+            break
+
+        except UnicodeDecodeError:
+            continue
+
+    else:
+        raise Exception("No se pudo leer el archivo con UTF-8 ni Latin-1")
 
     return numeros_limpios
 
+
+
+def guardar_numeros(numeros):
+    if not numeros:
+        return
+
+    with open(ARCHIVO_SALIDA, "a", encoding="utf-8") as f:
+        f.write(",".join(numeros) + ",")
+
 def imprimir_numeros_con_saltos(numeros):
-    """
-    Imprime los números con saltos de línea cada 50 números válidos
-    """
     print("\nNúmeros depurados y formateados:")
-    
-    count = 0
-    linea_actual = []
-    
-    for numero in numeros:
-        linea_actual.append(numero)
-        count += 1
-        
-        # Cada 50 números, imprimir la línea y hacer un salto
-        if count == 50:
-            print(",".join(linea_actual))
-            print("--------------------------------------")
-            linea_actual = []
-            count = 0
-    
-    # Imprimir los números restantes si los hay
-    if linea_actual:
-        print(",".join(linea_actual))
+
+    for i in range(0, len(numeros), 50):
+        print(",".join(numeros[i:i+50]))
+        print("--------------------------------------")
 
 def main():
     ruta = input("Ingresa la ruta del archivo CSV: ").strip()
+
     try:
         numeros = procesar_csv(ruta)
-        
-        if numeros:
-            # Imprimir con saltos cada 50 números
-            imprimir_numeros_con_saltos(numeros)
-            
-            print(f"\nTotal de números válidos procesados: {len(numeros)}")
-            
-            # Opcional: Escribir la salida a un archivo
-            # resultado = ",".join(numeros)
-            # with open("salida_numeros.txt", "w") as f:
-            #     f.write(resultado)
-            #     print("\nResultado guardado en 'salida_numeros.txt'")
-        else:
-            print("No se encontraron números válidos en el archivo.")
-            
+
+        if not numeros:
+            print("No se encontraron números válidos.")
+            return
+
+        imprimir_numeros_con_saltos(numeros)
+        guardar_numeros(numeros)
+
+        print(f"\nTotal de números válidos procesados: {len(numeros)}")
+        print(f"Archivo actualizado: {ARCHIVO_SALIDA}")
+
     except FileNotFoundError:
-        print("Archivo no encontrado. Por favor verifica la ruta.")
+        print("Archivo no encontrado.")
     except Exception as e:
-        print("Ocurrió un error:", e)
+        print("Error:", e)
 
 if __name__ == "__main__":
     main()
